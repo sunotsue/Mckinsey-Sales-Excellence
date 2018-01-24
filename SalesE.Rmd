@@ -1,0 +1,366 @@
+---
+title: "SalesE"
+output: pdf_document
+---
+
+<Data Preprocessing/Feature Engineering>
+
+```{r}
+# import training data
+train <- read.csv("train.csv", header = T, na.strings=c(""," ","NA"))
+# explore structure
+str(train)
+```
+
+```{r}
+# Drop columns we won't be using 
+train2 <- data.frame(train$DOB, train$Gender,train$Monthly_Income,train$Employer_Category1, train$Source_Category, train$Existing_EMI, train$Approved)
+str(train2)
+```
+
+```{r}
+# Drop missing values
+# install.packages(tidyr)
+library(tidyr)
+# train2$Employer_Category1[train2$Employer_Category1==""] <- "NA"
+train2 <- drop_na(train2, train.Employer_Category1)
+# train$Existing_EMI[train$Primary_Bank_Type==""] <- "NA"
+train2 <- drop_na(train2, train.Existing_EMI)
+str(train2)
+```
+
+
+```{r}
+# Taking care of missing data 
+# Average numerical variables
+#train2$Existing_EMI = ifelse(is.na(train2$Existing_EMI),ave(train2$Existing_EMI, FUN = function(x) mean(x, na.rm = TRUE)), train2$Existing_EMI)
+#train$Loan_Amount = ifelse(is.na(train$Loan_Amount),ave(train$Loan_Amount, FUN = function(x) mean(x, na.rm = TRUE)), train$Loan_Amount)
+#train$Loan_Period = ifelse(is.na(train$Loan_Period),ave(train$Loan_Period, FUN = function(x) mean(x, na.rm = TRUE)),train$Loan_Period)
+#train$Interest_Rate = ifelse(is.na(train$Interest_Rate),ave(train$Interest_Rate, FUN = function(x) mean(x, na.rm = TRUE)),train$Interest_Rate)
+#train$EMI = ifelse(is.na(train$EMI),ave(train$EMI, FUN = function(x) mean(x, na.rm = TRUE)),train$EMI)
+```
+
+```{r}
+# Encoding categorical data
+train2$train.Gender = factor(train2$train.Gender,
+                         levels = c('Female', 'Male'),
+                         labels = c(0, 1))
+
+#train$City_Category = factor(train$City_Category,levels = c('A', 'B', 'C', 'D'),clabels = c(1, 2, 3, 4))
+train2$train.Employer_Category1 = factor(train2$train.Employer_Category1,
+                         levels = c('A', 'B', 'C'),
+                         labels = c(1, 2, 3))
+#train$Employer_Category2 = factor(train$Employer_Category2, levels = c('1', '2', '3', '4'), labels = c(1, 2, 3, 4))
+#train$Primary_Bank_Type = factor(train$Primary_Bank_Type, levels = c('G', 'P'), labels = c(1, 2))
+#train$Contacted = factor(train$Contacted, levels = c('Y', 'N'), labels = c(1, 2))
+train2$train.Source_Category = factor(train2$train.Source_Category,
+                         levels = c('A', 'B', 'C', 'D', 'E', 'F', 'G'),
+                         labels = c(1, 2, 3, 4, 5, 6, 7))
+train2$train.Approved = factor(train2$train.Approved,
+                         levels = c('0', '1'),
+                         labels = c(0, 1))
+```
+
+```{r}
+# Make DOB into an age column
+library(lubridate)
+train2$train.DOB <- as.character(train2$train.DOB)
+train2$train.DOB <- fast_strptime(train2$train.DOB, '%d/%m/%y')
+train2$train.birth.year <- as.integer(year(train2$train.DOB))
+train2$train.age <- 2018 - (train2$train.birth.year)
+train2 <- train2[,-1]
+train2 <- train2[,-7]
+```
+
+```{r}
+# before applying XGBoost, tranform all categorical variables to numerical
+train2$train.Gender <- as.numeric(train2$train.Gender)
+train2$train.Employer_Category1 <- as.numeric(train2$train.Employer_Category1)
+train2$train.Source_Category <- as.numeric(train2$train.Source_Category)
+train2$train.Approved <- as.numeric(train2$train.Approved)
+str(train2)
+write.csv(train2, "train2.csv")
+```
+
+
+```{r}
+# Remove outliers 
+remove_outliers <- function(x, na.rm = TRUE, ...) {
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = na.rm, ...)
+  H <- 1.5 * IQR(x, na.rm = na.rm)
+  y <- x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  y
+}
+
+train2$train.age <- remove_outliers(train2$train.age)
+train2$train.Monthly_Income <- remove_outliers(train2$train.Monthly_Income)
+train2$train.Existing_EMI <- remove_outliers(train2$train.Existing_EMI)
+
+# drop NAs
+library(tidyr)
+train2 <- drop_na(train2, train.age)
+train2 <- drop_na(train2, train.Monthly_Income)
+train2 <- drop_na(train2, train.Existing_EMI)
+```
+
+```{r}
+# Splitting the dataset into the Training set and Test set
+# install.packages('caTools')
+library(caTools)
+set.seed(123)
+split = sample.split(train2$train.Approved, SplitRatio = 0.8)
+training_set = subset(train2, split == TRUE)
+test_set = subset(train2, split == FALSE)
+```
+
+
+```{r}
+# construct test so that it matches the structure of train2
+test <- read.csv("test.csv")
+# Drop columns we won't be using 
+test2 <- data.frame(test$DOB, test$Gender, test$Monthly_Income,test$Employer_Category1, test$Source_Category, test$Existing_EMI)
+str(test2)
+```
+
+```{r}
+# Taking care of missing data 
+test2$test.Existing_EMI = ifelse(is.na(test2$test.Existing_EMI),ave(test2$test.Existing_EMI, FUN = function(x) mean(x, na.rm = TRUE)), test2$test.Existing_EMI)
+ 
+# Encoding categorical data
+test2$test.Gender = factor(test2$test.Gender,
+                         levels = c('Female', 'Male'),
+                         labels = c(0, 1))
+test2$test.Employer_Category1 = factor(test2$test.Employer_Category1,
+                         levels = c('A', 'B', 'C'),
+                         labels = c(1, 2, 3))
+test2$test.Source_Category = factor(test2$test.Source_Category,
+                         levels = c('A', 'B', 'C', 'D', 'E', 'F', 'G'),
+                         labels = c(1, 2, 3, 4, 5, 6, 7))
+```
+
+```{r}
+#add new factor level for NA 
+test2$test.Employer_Category1 = factor(test2$test.Employer_Category1, levels=c(levels(test2$test.Employer_Category1), 4))
+
+#convert all NA's to 4
+test2$test.Employer_Category1[is.na(test2$test.Employer_Category1)] = 4
+
+#check levels again
+levels(test2$test.Employer_Category1)
+```
+
+```{r}
+# Make DOB into an age column
+library(lubridate)
+test2$test.DOB <- as.character(test2$test.DOB)
+test2$test.DOB <- fast_strptime(test2$test.DOB, '%d/%m/%y')
+test2$test.birth.year <- as.integer(year(test2$test.DOB))
+test2$test.age <- 2018 - (test2$test.birth.year)
+test2 <- test2[,-1]
+test2 <- test2[,-6]
+```
+
+```{r}
+# make factor to numeric varibles for Classification
+test2$test.Gender <- as.numeric(test2$test.Gender)
+test2$test.Employer_Category1 <- as.numeric(test2$test.Employer_Category1)
+test2$test.Source_Category <- as.numeric(test2$test.Source_Category)
+str(test2)
+```
+
+<Imbalance Classification>
+
+```{r}
+# ROSE
+training_set$train.Approved[training_set$train.Approved == 1] <- 0
+training_set$train.Approved[training_set$train.Approved == 2] <- 1
+training_set$train.Approved <- as.factor(training_set$train.Approved)
+test_set$train.Approved <- as.factor(test_set$train.Approved)
+
+library(ROSE)
+data.rose <- ROSE(train.Approved ~ ., data= training_set, seed=1, hmult.majo = 0.25, hmult.mino = 0.5)$data
+table(data.rose$train.Approved)
+
+tree.rose <- rpart(train.Approved ~ ., data=data.rose)
+pred.tree.rose <- predict(tree.rose, newdata = test_set)
+roc.curve(test_set$train.Approved, pred.tree.rose[,2])
+# 0.741
+```
+
+```{r}
+# Both
+data_balanced_both <- ovun.sample(train.Approved ~ ., data = training_set, method = "both", p=0.5, N=1000, seed = 1)$data
+table(data_balanced_both$train.Approved)
+
+tree.both <- rpart(train.Approved ~ ., data = data_balanced_both)
+pred.tree.both <- predict(tree.both, newdata = test_set)
+pred.tree.both2 <- predict(tree.both, newdata = training_set)
+roc.curve(test_set$train.Approved, pred.tree.both[,2])
+# 0.749
+write.csv(pred.tree.both, "pred.tree.both.csv")
+write.csv(pred.tree.both2, "pred.tree.both2.csv")
+pred.tree.merged <- rbind(pred.tree.both, pred.tree.both2)
+write.csv(pred.tree.merged, "pred.tree.merged.csv")
+pred.tree.merged <- pred.tree.merged[,-1]
+write.csv(pred.tree.merged, "pred.tree.merged.csv")
+write.csv(train2, "train2.csv")
+pred.tree.merged <- read.csv("pred.tree.merged.csv")
+train2 <- read.csv("train2.csv")
+pred.tree <- merge(pred.tree.merged, train2, by="Number")
+write.csv(pred.tree, "pred.tree.csv")
+```
+
+```{r}
+# Oversampling
+data_balanced_over <- ovun.sample(train.Approved ~ ., data = training_set, method = "over", N = 50000)$data
+table(data_balanced_over$train.Approved)
+tree.over <- rpart(train.Approved ~ ., data = data_balanced_over)
+pred.tree.over <- predict(tree.over, newdata = test_set)
+roc.curve(test_set$train.Approved, pred.tree.over[,2])
+# 0.5
+```
+
+```{r}
+# Undersampling
+data_balanced_under <- ovun.sample(train.Approved ~ ., data = training_set, method = "under", N = 500, seed = 1)$data
+table(data_balanced_under$train.Approved)
+tree.under <- rpart(train.Approved ~ ., data = data_balanced_under)
+pred.tree.under <- predict(tree.under, newdata = test_set)
+roc.curve(test_set$train.Approved, pred.tree.under[,2])
+# 0.673
+```
+
+Both undersampling and oversampling on this imbalanced data seems to be the most effective, with the greatest area under the ROC (aka the greatest level of accuracy). The accuracy of the test depends on how well the test separates the Approved from the unApproved. 
+
+<Predicting on the actual Test Set> 
+```{r}
+write.csv(test2, "test2.csv")
+test2 <- read.csv("test2.csv")
+pred.tree <- read.csv("pred.tree.csv")
+
+pred.tree$train.Approved[pred.tree$train.Approved == 1] <- 0
+pred.tree$train.Approved[pred.tree$train.Approved == 2] <- 1
+pred.tree$train.Approved <- as.factor(pred.tree$train.Approved)
+pred.tree$train.Approved <- as.factor(pred.tree$train.Approved)
+
+test2$test.Approved <- as.factor(test2$test.Approved)
+test2$test.Approved <- as.factor(test2$test.Approved)
+
+# Both
+
+pred.tree.both3 <- predict(tree.both, newdata=test2)
+pred.tree.both3 <- pred.tree.both3[, 2]
+write.csv(pred.tree.both3, "pred.tree.both3.csv")
+```
+
+<XG Boost>
+
+```{r}
+# Fitting XGBoost to the Training set
+install.packages('xgboost')
+library(xgboost)
+training_set$train.Approved <- as.numeric(training_set$train.Approved)
+test_set$train.Approved <- as.numeric(test_set$train.Approved)
+label <- as.matrix(training_set$train.Approved)
+y_label <- as.matrix(test_set[,6])
+fit_cv <- xgb.cv(data=training_set, nfold=5, label=as.matrix(training_set$train.Approved), nround=10, objective='binary:logistic', eval_metric='auc')
+
+classifier = xgboost(data = as.matrix(training_set[-6]), label = training_set$train.Approved, nrounds = 10)
+# We can see the RMSE decreasing throught the 10 iterations. 
+```
+
+```{r}
+# Predicting the Test set results
+y_pred = predict(classifier, newdata = as.matrix(test_set[-6]))
+y_pred.resp = ifelse(y_pred >= 0.2, 1, 0)
+library(caret)
+
+# Making the Confusion Matrix
+cm = table(test_set[,6], y_pred)
+```
+ALL TRUE ERROR! 
+
+```{r}
+# Applying k-Fold Cross Validation
+library(caret)
+folds = createFolds(training_set$train.Approved, k = 10)
+cv = lapply(folds, function(x) {
+  training_fold = training_set[-x, ]
+  test_fold = training_set[x, ]
+  classifier = xgboost(data = as.matrix(training_set[-6]), label = training_set$train.Approved, nrounds = 10)
+  y_pred = predict(classifier, newdata = as.matrix(test_fold[-6]))
+  y_pred = (y_pred >= 0.5)
+  cm = table(test_fold[, 6], y_pred)
+  accuracy = (cm[1,1] + cm[2,2]) / (cm[1,1] + cm[2,2] + cm[1,2] + cm[2,1])
+  return(accuracy)
+})
+accuracy = mean(as.numeric(cv))
+```
+
+XGBoost #2
+```{r}
+param <- list(objective   = "binary:logistic",
+              eval_metric = "error",
+              max_depth   = 7,
+              eta         = 0.1,
+              gammma      = 1,
+              colsample_bytree = 0.5,
+              min_child_weight = 1)
+
+set.seed(1234)
+
+# Pass in our hyperparameteres and train the model 
+system.time(xgb <- xgboost(params  = param,
+                           data    = as.matrix(train2),
+                           label   = train.label, 
+                           nrounds = 500,
+                           print_every_n = 100,
+                           verbose = 1))
+```
+
+```{r}
+ctrl <- trainControl(method = "repeatedcv", 
+                     number = 10, 
+                     repeats = 10, 
+                     verboseIter = FALSE,
+                     sampling = "rose")
+
+set.seed(42)
+model_rf_rose <- caret::train(Approved ~ .,
+                              data = train2,
+                              method = "rf",
+                              preProcess = c("scale", "center"),
+                              trControl = ctrl)
+final_rose <- data.frame(actual = test2$Approved,
+                         predict(model_rf_rose, newdata = test2, type = "prob"))
+final_rose$predict <- ifelse(final_rose$Approved > 0.5, "1", "0")
+cm_rose <- confusionMatrix(final_rose$predict, test2$Approved)
+```
+
+Logistic Regression
+
+```{r}
+# logistic regression
+
+classifier = glm(formula = train.Approved ~ .,
+                 family = binomial,
+                 data = training_set)
+```
+
+```{r}
+# Predicting the Test set results
+prob_pred = predict(classifier, type = 'response', newdata = training_set[6])
+y_pred = ifelse(prob_pred > 0.5, 1, 0)
+
+# Making the Confusion Matrix
+cm = table(test_set[, 6], y_pred > 0.5)
+
+# creating solution set
+sol <- cbind(test$ID, y_pred)
+library(dplyr)
+write.csv(sol, "sol.csv")
+sol <- read.csv("/Users/su.min.park@ibm.com/Documents/SalesE/sol.csv")
+rename(sol, ID = V1, Approved = y_pred)
+```
