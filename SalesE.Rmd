@@ -235,6 +235,7 @@ roc.curve(test_set$train.Approved, pred.tree.under[,2])
 Both undersampling and oversampling on this imbalanced data seems to be the most effective, with the greatest area under the ROC (aka the greatest level of accuracy). The accuracy of the test depends on how well the test separates the Approved from the unApproved. 
 
 <Predicting on the actual Test Set> 
+
 ```{r}
 write.csv(test2, "test2.csv")
 test2 <- read.csv("test2.csv")
